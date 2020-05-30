@@ -1,13 +1,17 @@
-import datetime
-from numba import jit
-import pyqtgraph as pg
-from UIs.TabWidgetUI import Ui_TabWidget
-from Modules.GetDirectory import get_directory
-from Modules.Currencies import Currencies
-from PyQt5.QtWidgets import QWidget, QCompleter, QLabel
-from PyQt5.QtWidgets import QTabWidget
-from Modules.EasyThreadsQt import queue_thread_qt
+"""Модуль, содержащий класс вкладки для основной программы, а также все
+необходимые классы и функции для его работы"""
 
+import datetime
+
+import pyqtgraph as pg
+from PyQt5.QtWidgets import QTabWidget
+from PyQt5.QtWidgets import QWidget, QCompleter, QLabel
+from numba import jit
+
+from Modules.Currencies import Currencies
+from Modules.EasyThreadsQt import queue_thread_qt
+from Modules.GetDirectory import get_directory
+from UIs.TabWidgetUI import Ui_TabWidget
 
 QUOTES_ACCURACY = 4  # Точность котировок
 CHANGE_ACCURACY = 2  # Точность изменения курса
@@ -16,9 +20,10 @@ DOWN_TRIANGLE = '▼'
 GREEN = 'green'
 RED = 'red'
 BLACK = 'black'
-# Стиль для текста с изменением курса
+# CSS стиль для текста с изменением курса
 COURSE_CHANGE_LABEL_STYLESHEET = 'color:{}'
 STANDARD_DATE_FORMAT = '%d.%m.%Y'
+STANDARD_CURRENCY_PAIR = 'EURUSD'
 
 
 @jit
@@ -43,17 +48,6 @@ def find_bigger_nearest(array, value):
         if array[i] > value:
             return i
     return len(array) - 1
-
-
-# Старый вариант, который работает иначе
-# def equation_of_line(x1, y1, x2, y2):
-#     def equation(x):
-#         if x1 == x2 and y1 == y2:
-#             return y1
-#         elif x2 - x1 == 0:
-#             return x2
-#         return (y2 * (x - x1) - y1 * (x - x2)) / (x2 - x1)
-#     return equation
 
 
 @jit
@@ -111,6 +105,7 @@ def attach_to_plot_item(axis: pg.AxisItem, plot_item: pg.PlotWidget):
 
 class TimeAxisItem(pg.AxisItem):
     """Временная ось для графика pyqtgraph"""
+
     def tickStrings(self, values, scale, spacing):
         return list(map(date_from_days_formatted, values))
 
@@ -118,6 +113,7 @@ class TimeAxisItem(pg.AxisItem):
 class CrossHair:
     """Класс перекрестия для графика pyqtgraph. В конструктор передаётся
     график, данные, которые использует график для построения и родитель"""
+
     def __init__(self, current_plot, data, parent):
         self.vertical_line = pg.InfiniteLine(angle=90, movable=False)
         self.horizontal_line = pg.InfiniteLine(angle=0, movable=False)
@@ -145,12 +141,11 @@ class CrossHair:
             elif x > self.data[-1][1]:
                 x = self.data[-1][1]
             min_value_index = find_nearest(self.data[:, 1], x)
-            max_value_item = find_bigger_nearest(self.data[:, 1], x)
+            max_value_index = find_bigger_nearest(self.data[:, 1], x)
             x1 = self.data[min_value_index][1]
             y1 = self.data[min_value_index][0]
-            x2 = self.data[max_value_item][1]
-            y2 = self.data[max_value_item][0]
-            # y = equation_of_line(x1, y1, x2, y2)(x)
+            x2 = self.data[max_value_index][1]
+            y2 = self.data[max_value_index][0]
             y = equation_of_line(x1, y1, x2, y2, x)
             date = date_from_days_formatted(x)
             self.parent.graphic_value_label.setText('\n'.join(
@@ -168,6 +163,7 @@ class CrossHair:
 
 class TabWidget(QWidget, Ui_TabWidget):
     """Класс вкладки для основной программы"""
+
     def __init__(self, tabs_holder=None, parent=None):
         super().__init__(parent=parent)
         self.setupUi(self)
@@ -176,12 +172,12 @@ class TabWidget(QWidget, Ui_TabWidget):
         self.tabs_holder = tabs_holder
         self.currencies_class = Currencies(get_directory())
         self.currencies = self.currencies_class.currency_pairs()
+        self.currency_pair_box.addItems(self.currencies)
         self.currency_pair_box.currentTextChanged.connect(
             self.change_currency_pair_info)
         self.close_btn.clicked.connect(self.close_tab)
         self.currency_pair = self.currency_pair_box.currentText()
         self.currency_pair_box.currentIndexChanged.connect(self.plot_graphic)
-        self.currency_pair_box.addItems(self.currencies)
         self.currency_pair_box.setCompleter(QCompleter(self.currencies))
         plot_item = self.exchange_rate_graphic.getPlotItem()
         time_axis = TimeAxisItem('bottom')
@@ -189,6 +185,7 @@ class TabWidget(QWidget, Ui_TabWidget):
         delete_axis_from_plot_item('left', plot_item)
         attach_to_plot_item(pg.AxisItem('right'), plot_item)
         plot_item.getViewBox().setLimits(yMin=0)
+        self.set_standard_item()
 
     def change_currency_pair_info(self, text):
         """Метод меняет информацию о валютной паре во вкладке"""
@@ -211,20 +208,20 @@ class TabWidget(QWidget, Ui_TabWidget):
         if self.tab_widget:
             return self.tab_widget.indexOf(self)
 
-    def plot_graphic(self, index):
+    def plot_graphic(self):
         """Метод отвечает за построение графика и перекрестия"""
         self.cross_hair = None
-        self.thread_plot_graphic(index)
+        self.thread_plot_graphic()
         # Декоратор, возвращающийся в результате работы функциии queue_thread_qt
-        # содержит атрибут _thread, хранящий поток, выполняющий построение
-        # графика
-        thread = self.thread_plot_graphic._thread
+        # содержит поле thread, хранящее поток, в котором выполняется
+        # построение графика
+        thread = self.thread_plot_graphic.thread
         # По завершению потока строим перекрестие, т.к. при построении его
         # в потоке оно не работает
         thread.finished.connect(self.enable_cross_hair)
 
-    @queue_thread_qt()  # Метод работает в отдельной очереди потоков
-    def thread_plot_graphic(self, index):
+    @queue_thread_qt  # Метод работает в отдельной очереди потоков
+    def thread_plot_graphic(self):
         """Метод вычисляет котировки валют и строит по ним график"""
         currency_pair = self.currency_pair_box.currentText()
         self.currency_pair = currency_pair
@@ -292,3 +289,16 @@ class TabWidget(QWidget, Ui_TabWidget):
         if self.tab_widget:
             index = self.tab_index
             self.tabs_holder.close_tab(index)
+
+    def set_standard_item(self):
+        """Метод выставляет в currency_pair_box стандартную валютную пару,
+        указанную в переменной STANDART_CURRENCY_PAIR"""
+        if STANDARD_CURRENCY_PAIR in self.currencies:
+            index = self.currencies.index(STANDARD_CURRENCY_PAIR)
+            self.currency_pair_box.setCurrentIndex(index)
+
+    def reset_tab(self):
+        """Метод возвращает вкладку к изначальному состоянию
+        (к моменту создания)"""
+        self.set_standard_item()
+        self.plot_graphic()

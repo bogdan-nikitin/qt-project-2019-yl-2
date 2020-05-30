@@ -1,10 +1,16 @@
+"""Модуль для простой работы с потоками в PyQt5"""
+
+import typing
+
 from PyQt5.QtCore import QThread
+from multimethod import multimethod
 
 
 class SimpleThreadQt(QThread):
     """Простой поток, принимающий фунцию и аргументы, которые следует в неё
     передать при запуске потока. Результат работы функции записывается в атрибут
     result объекта класса. Запуск потока осуществляется через метод start"""
+
     def __init__(self, function, function_args, function_kwargs,
                  *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -17,18 +23,21 @@ class SimpleThreadQt(QThread):
         self.result = self.function(*self.function_args, **self.function_kwargs)
 
     """Получить результат работы функции"""
+
     def get_result(self):
         return self.result
 
 
-def simple_thread_qt(function):
+def simple_thread_qt(func):
     """Декоратор, возвращающий функцию, которая запускает переданную в декоратор
     функцию function в потоке SimpleThreadQt. Декоратор передаёт поток в
     атрибут функции _thread"""
+
     def function_in_thread(*args, **kwargs):
-        thread = SimpleThreadQt(function, args, kwargs)
-        function_in_thread._thread = thread
+        thread = SimpleThreadQt(func, args, kwargs)
+        function_in_thread.thread = thread
         thread.start()
+
     return function_in_thread
 
 
@@ -39,10 +48,10 @@ class QueueThreadQt(QThread):
     данных). Запуск потока осуществляется через метод begin"""
     queues = {}
 
-    def __init__(self, function, function_args, function_kwargs, tag='',
+    def __init__(self, func, function_args, function_kwargs, tag='',
                  *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.function = function
+        self.function = func
         self.function_args = function_args
         self.function_kwargs = function_kwargs
         self.result = None
@@ -57,6 +66,7 @@ class QueueThreadQt(QThread):
         self.result = self.function(*self.function_args, **self.function_kwargs)
 
     """Получить результат работы функции"""
+
     def get_result(self):
         return self.result
 
@@ -82,22 +92,27 @@ class QueueThreadQt(QThread):
             queue[0].start()
 
 
-def queue_thread_qt(tag=''):
+@multimethod
+def queue_thread_qt(tag: str = ''):
     """Функция, возвращающая декоратор, запускающий фунцию в потоке
     QueueThreadQt с тегом tag(если тег не указан, то тегом становится название
     функции)"""
-    def queue_thread_qt_decorator(function):
+
+    def queue_thread_qt_decorator(func):
         """Декоратор, запускающий функцию в потоке QueueThreadQt с тегом
         tag(если тег не указан, то тегом становится название функции). Поток
         записывается в атрибут _thread функции function"""
-        nonlocal tag
-        if tag == '':
-            tag = function.__name__
 
         def function_in_thread(*args, **kwargs):
-            thread = QueueThreadQt(function, args, kwargs, tag)
-            function_in_thread._thread = thread
+            thread = QueueThreadQt(func, args, kwargs, tag)
+            function_in_thread.thread = thread
             thread.begin()
+
         return function_in_thread
 
     return queue_thread_qt_decorator
+
+
+@multimethod
+def queue_thread_qt(func: typing.Callable):
+    return queue_thread_qt(func.__name__)(func)
