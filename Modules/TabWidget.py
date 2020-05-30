@@ -23,7 +23,7 @@ BLACK = 'black'
 # CSS стиль для текста с изменением курса
 COURSE_CHANGE_LABEL_STYLESHEET = 'color:{}'
 STANDARD_DATE_FORMAT = '%d.%m.%Y'
-STANDARD_CURRENCY_PAIR = 'EURUSD'
+STANDARD_CURRENCY_PAIR = 'EURRUB'
 
 
 @jit
