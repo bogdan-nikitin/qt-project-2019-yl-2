@@ -8,11 +8,9 @@ from PyQt5.QtWidgets import QApplication, QMessageBox
 
 
 DATABASES_FOLDER = 'Databases'
-MESSAGE_BOX_TEXT = 'Произошла ошибка'
-MESSAGE_BOX_INFORMATIVE_TEXT = ('В прошлый раз программа завершила свою '
-                                'работу неккоректно. Неисправные файлы '
-                                'программы были удалены.')
-MESSAGE_BOX_TITLE = 'Ошибка'
+MESSAGE_BOX_TEXT = 'В прошлый раз программа завершила свою работу некорректно.'
+MESSAGE_BOX_INFORMATIVE_TEXT = 'Неисправные файлы программы были удалены.'
+MESSAGE_BOX_TITLE = 'Некорретное завершение работы'
 LOG_FILE_PATH = 'log.txt'
 
 
@@ -33,7 +31,7 @@ def read_log():
 def show_error_message():
     """Показывает окно с ошибкой о неудачном предыдущем запуске"""
     error_message_box = QMessageBox()
-    error_message_box.setIcon(QMessageBox.Critical)
+    error_message_box.setIcon(QMessageBox.Warning)
     error_message_box.setText(MESSAGE_BOX_TEXT)
     error_message_box.setInformativeText(MESSAGE_BOX_INFORMATIVE_TEXT)
     error_message_box.setWindowTitle(MESSAGE_BOX_TITLE)

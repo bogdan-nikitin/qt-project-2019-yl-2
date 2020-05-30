@@ -161,8 +161,15 @@ def date_range(start: datetime.datetime,
 @multimethod
 def date_range(start: datetime.datetime,
                end: datetime.datetime,
-               step: int = 1) -> object_range:
+               step: int) -> object_range:
     return date_range(start, end, datetime.timedelta(step))
+
+
+@multimethod
+def date_range(start: datetime.datetime,
+               end: datetime.datetime) -> object_range:
+    # Если шаг не указан, то выставляем шаг в один день
+    return date_range(start, end, 1)
 
 
 @multimethod
