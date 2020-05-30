@@ -1,16 +1,21 @@
-import requests
-import sqlite3
-import xml.dom.minidom
-import os
+"""Модуль, содержащий основные функции, константы, классы для работы с
+котировками и БД"""
+
+import datetime
 import itertools
 import operator
-import datetime
+import os
+import sqlite3
+import typing
+import xml.dom.minidom
+
 import numpy as np
+import requests
+from multimethod import multimethod
 from numba import jit
 
 CURRENCY_CODES_URL = 'http://www.cbr.ru/scripts/XML_valFull.asp'
-CURRENCY_VALUES_URL = ('http://www.cbr.ru/scripts/XML_dynamic.asp?date_req1={}&'
-                       'date_req2={}&VAL_NM_RQ={}')
+CURRENCY_VALUES_URL = 'http://www.cbr.ru/scripts/XML_dynamic.asp'
 CODES_TABLE_CREATE_REQUEST = '''CREATE TABLE codes (
     id        INTEGER PRIMARY KEY AUTOINCREMENT
                       UNIQUE
@@ -60,7 +65,7 @@ MISSING_CHAR_CODES = {'R01436': 'LTT',
                       'R01720A': 'UAK'}
 # Самая ранняя дата, с которой с сайта ЦБР можно получить котировки
 START_DATE = datetime.datetime(1753, 1, 1)  # 01/01/1753
-MINIMAL_DATE = datetime.datetime(1, 1, 1)
+ZERO_DATE = datetime.datetime(1, 1, 1)
 RUB_CHAR_CODE = 'RUB'
 NOMINAL_FIELD = 'nominal'
 CURRENCY_ID_FIELD = 'currency_id'
@@ -74,24 +79,28 @@ ATTRIBUTE_DATE_FORMAT = '%d.%m.%Y'
 # в дальнейших обновлениях программы
 @jit
 def elements_difference(array: np.array):
-    """Возвращает массив разностей между элементами массива array"""
-    difference_array = np.zeros(0)
-    for i in range(array.shape[0] - 1):
-        difference_array = np.append(difference_array, array[i] - array[i + 1])
+    """Возвращает массив разностей между элементами массива array.
+    Например, для массива [5, 4, 3, 2, 1] массив разностей будет следующим:
+    [5 - 4, 4 - 3, 3 - 2, 2 - 1] (или [1, 1, 1, 1])"""
+    difference_array_size = array.shape[0] - 1
+    difference_array = np.zeros(difference_array_size)
+    for i in range(difference_array_size):
+        difference_array[i] = array[i] - array[i + 1]
     return difference_array
 
 
 @jit
 def elements_percent_difference(array: np.array):
-    """Возвращает массив разностей между элементами массива array в процентах"""
-    difference_array = np.zeros(0)
-    for i in range(array.shape[0] - 1):
-        difference_array = np.append(difference_array,
-                                     (array[i] - array[i + 1]) / array[i] * 100)
+    """Возвращает массив разностей между элементами массива array в процентах.
+    Например, для массива [32, 16, 8, 4, 2] массив разностей в процентах
+    будет следующим: [50, 50, 50, 50, 50]"""
+    difference_array_size = array.shape[0] - 1
+    difference_array = np.zeros(difference_array_size)
+    for i in range(difference_array_size):
+        difference_array[i] = (array[i] - array[i + 1]) / array[i] * 100
     return difference_array
 
 
-@jit
 def currencies(currency_pair: str):
     """Разделяет строку с названием валютной пары на строки, содержащие названия
     валют"""
@@ -107,7 +116,7 @@ def create_empty_file(full_path: str):
     open(full_path, mode='w').close()
 
 
-def datetime_to_days(datetime_object):
+def datetime_to_days(datetime_object: datetime):
     """Конвертирует объект datetime в дни"""
     if type(datetime_object) is datetime.date:
         date = datetime.datetime(datetime_object.year,
@@ -115,11 +124,11 @@ def datetime_to_days(datetime_object):
                                  datetime_object.day)
     else:
         date = datetime_object
-    return (date - MINIMAL_DATE).days
+    return (date - ZERO_DATE).days
 
 
 def now_date():
-    """Сегодняшняя дата"""
+    """Возвращает сегодняшнюю дату"""
     current_date = datetime.datetime.now()
     date_value = datetime.date(current_date.year,
                                current_date.month,
@@ -136,25 +145,41 @@ def object_range(start, end, step):
         current += step
 
 
-def date_range(start, end=None, step=1):
-    """Возвращает генератор object_range, где start=start(или MINIMAL_DATE, если
-    end не указан), end=end(или start, если end не указан) и
-    step=datetime.timedelta(step), т.е. с шагом в step дней"""
-    if end is None:
-        start = MINIMAL_DATE
-        end = start
-    return object_range(start, end, datetime.timedelta(days=step))
+@multimethod
+def date_range(start: datetime.datetime,
+               end: datetime.datetime,
+               step: datetime.timedelta) -> object_range:
+    """Генератор по типу range для дат. Генерирует даты в промежутке
+    [start, end) с шагом step (либо datetime.timedelta(step), если step
+    относится к типу int)
+    Возвращает генератор object_range, где start=start(или MINIMAL_DATE, если
+    передан только один аргумент), end=end и
+    step=step (либо datetime.timedelta(step), если step относится к типу int)"""
+    return object_range(start, end, step)
+
+
+@multimethod
+def date_range(start: datetime.datetime,
+               end: datetime.datetime,
+               step: int = 1) -> object_range:
+    return date_range(start, end, datetime.timedelta(step))
+
+
+@multimethod
+def date_range(end: typing.Optional[datetime.datetime]) -> object_range:
+    return date_range(ZERO_DATE, end)
 
 
 class Currencies:
     """Класс для работы с валютами: получения котировок, создания баз данных
     с информацией о валютах. В конструктор принимает директорию, в которой
     будет вестись работа с базами данных"""
+
     def __init__(self, directory: str):
         self.directory = directory
 
     @property
-    def database_path(self):
+    def database_path(self) -> str:
         """Свойство, возвращающее путь к папке с базами данных"""
         return '/'.join([self.directory,
                          DATABASES_FOLDER_NAME])
@@ -170,6 +195,7 @@ class Currencies:
         con = sqlite3.connect(database_path)
         cur = con.cursor()
         cur.execute(CODES_TABLE_CREATE_REQUEST)
+        # Получаем коды с ЦБР с помощью requests и парсим полученный ответ
         codes = requests.get(CURRENCY_CODES_URL).text
         doc = xml.dom.minidom.parseString(codes)
         for currency in doc.getElementsByTagName(CURRENCY_TAG):
@@ -193,14 +219,14 @@ class Currencies:
         con.commit()
         con.close()
 
-    def check_currency_codes_database(self):
+    def check_currency_codes_database(self) -> bool:
         """Метод провиляет наличие базы данных с информацией о валютах"""
         database_path = self.database_path + '/' + CURRENCY_CODES_DB_NAME
         if not os.path.isfile(database_path):
             return False
         return True
 
-    def currency_pairs(self):
+    def currency_pairs(self) -> typing.List[str]:
         """Возвращает список валютных пар"""
         database_path = self.database_path + '/' + CURRENCY_CODES_DB_NAME
         if not self.check_currency_codes_database():
@@ -227,18 +253,18 @@ class Currencies:
         if value and len(value) > 0:
             return value[0]
 
-    def currency_path(self, currency):
+    def currency_path(self, currency) -> str:
         """Путь к базе данных валюты currency"""
         return '/'.join([self.database_path,
                          CURRENCIES_FOLDER_NAME,
                          currency + '.db'])
 
-    def check_quotations(self, currency):
+    def check_quotations(self, currency) -> bool:
         """Проверка существования котировок для валюты currency"""
         database_path = self.currency_path(currency)
         return os.path.isfile(database_path)
 
-    def create_quotations(self, currency):
+    def create_quotations(self, currency) -> None:
         """Метод создаёт котировки валюты с кодом ISO, записанным в аргумент
         currency"""
         database_path = self.currency_path(currency)
@@ -249,7 +275,7 @@ class Currencies:
         con.close()
         self.update_quotations(currency)
 
-    def update_quotations(self, currency):
+    def update_quotations(self, currency) -> None:
         """Метод обновляет котировки валюты с кодом ISO, равным currency"""
         if not self.check_quotations(currency):
             return
@@ -262,7 +288,7 @@ class Currencies:
             start = START_DATE
 
         else:
-            start_date = (datetime.datetime(1, 1, 1) +
+            start_date = (ZERO_DATE +
                           datetime.timedelta(days=start_date_value[0] + 1))
             if start_date < START_DATE:
                 start = START_DATE
@@ -278,10 +304,12 @@ class Currencies:
                             (1, days))
         currency_id = self.get_by_char_code(currency, CURRENCY_ID_FIELD)
         currency_nominal = self.get_by_char_code(currency, NOMINAL_FIELD)
-        url = CURRENCY_VALUES_URL.format(formatted_date,
-                                         current_date.strftime(URL_DATE_FORMAT),
-                                         currency_id)
-        currency_values_xml = requests.get(url).text
+        currency_values_xml = requests.get(
+            CURRENCY_VALUES_URL,
+            params={'date_req1': formatted_date,
+                    'date_req2': current_date.strftime(URL_DATE_FORMAT),
+                    'VAL_NM_RQ': currency_id}
+        ).text
         currency_values_doc = xml.dom.minidom.parseString(currency_values_xml)
         for record in currency_values_doc.getElementsByTagName(RECORD_TAG):
             record: xml.dom.minidom.Element = record
@@ -296,12 +324,17 @@ class Currencies:
         con.commit()
         con.close()
 
-    def quotes_of_currency(self, currency):
-        """Возвращает котировки валюты"""
+    def quotes_of_currency(self,
+                           currency) -> typing.List[typing.Tuple[float, int]]:
+        """Возвращает котировки валюты в виде списка пар значение-дата, где
+        дата - это кол-во дней, прошедших с 1.01.0001."""
+        # Проверяем, существуют ли котировки для заданной валюты, и если нет,
+        # то создаём их, а иначе считываем из БД
         if not self.check_quotations(currency):
             self.create_quotations(currency)
         con = sqlite3.connect(self.currency_path(currency))
         cur = con.cursor()
+        # Находим последнюю дату, для которой получены котировки
         last_day_value = cur.execute('SELECT days FROM quotations '
                                      'ORDER BY days DESC').fetchone()
         if not last_day_value:
@@ -309,11 +342,14 @@ class Currencies:
         else:
             last_day = last_day_value[0]
         current_day = datetime_to_days(datetime.datetime.now())
+        # Если дата последней котировки не совпадает с текущей, обновляем
+        # котировки
         if last_day != current_day:
             con.close()
             self.update_quotations(currency)
             con = sqlite3.connect(self.currency_path(currency))
             cur = con.cursor()
+        # Получаем список котировок из БД и возвращаем его
         table_values = cur.execute('SELECT value, days '
                                    'FROM quotations ORDER BY days')
         if not table_values:
@@ -321,8 +357,13 @@ class Currencies:
         values = list(table_values.fetchall())
         return values
 
-    def quotes_of_currency_pair(self, currency_pair: str):
-        """Возвращает котировки валютной пары"""
+    def quotes_of_currency_pair(
+            self, currency_pair: str
+    ) -> typing.Optional[np.ndarray]:
+        """Возвращает котировки валютной пары. Если указанная пара
+        недействительна, возвращает None."""
+        # Название любой валютной пары должно состоять из 6 символов (к
+        # примеру USDRUB). Если это не так, возвращаем None
         if len(currency_pair) != 6:
             return
         base_currency, quote_currency = currencies(currency_pair)
@@ -338,10 +379,10 @@ class Currencies:
         quotations = masked_base_quotations / masked_quote_quotations
         return np.column_stack((quotations, days))
 
-    def currency_pair_info(self, currency_pair):
+    def currency_pair_info(self, currency_pair):  # -> typing.Tuple[str, str]:
         """Возвращает информацию о валютной паре: кортеж из названий каждой
-        валюты через слеш и кодов ISO каждой валюты через слеш. Если это
-        невозможно, возврщает кортеж из двух пустых строк"""
+        валюты через слеш и кодов ISO каждой валюты через слеш. Если валютная
+        пара недействительна, возвращает кортеж из двух пустых строк."""
         if len(currency_pair) != 6:
             return '', ''
         base_currency, quote_currency = currencies(currency_pair)
@@ -360,5 +401,8 @@ class Currencies:
         if any(map(lambda v: v is None, [base_currency, base_currency_name,
                                          quote_currency, quote_currency_name])):
             return '', ''
+        # Пришлось убрать аннотацию типа возвращаемого значения этой функции,
+        # т.к. PyCharm не в силах понять, что тип этого:
         return tuple(map('/'.join, [[base_currency_name, quote_currency_name],
                                     [base_currency, quote_currency]]))
+        # - как раз typing.Tuple[str, str]

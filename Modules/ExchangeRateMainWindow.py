@@ -1,14 +1,17 @@
-from UIs.ExchangeRateMainWindowUI import Ui_ExchangeRateMainWindow
-from Modules.TabWidget import TabWidget
-from Modules.Forms import HelpWidget, AboutWidget
+"""Модуль, содержащий главное класс главного окна программы"""
+
 from PyQt5.QtWidgets import QMainWindow, QTabWidget
 
+from Modules.Forms import HelpWidget, AboutWidget
+from Modules.TabWidget import TabWidget
+from UIs.ExchangeRateMainWindowUI import Ui_ExchangeRateMainWindow
 
 MARK = '✓'
 
 
 class ExchangeRateMainWindow(QMainWindow, Ui_ExchangeRateMainWindow):
     """Класс главного окна программы"""
+
     def __init__(self):
         super().__init__()
         self.setupUi(self)
@@ -18,7 +21,7 @@ class ExchangeRateMainWindow(QMainWindow, Ui_ExchangeRateMainWindow):
         self.change_cross_hair_action_text()
         self.add_tab()
         self.tab_widget.currentChanged.connect(self.add_tab)
-        self.cross_hair_action.triggered.connect(self.change_cross_hair)
+        self.cross_hair_action.triggered.connect(self.switch_cross_hair)
         self.help = HelpWidget()
         self.about = AboutWidget()
         self.help.hide()
@@ -38,12 +41,15 @@ class ExchangeRateMainWindow(QMainWindow, Ui_ExchangeRateMainWindow):
     def close_tab(self, index):
         """Закрытие вкладки по индексу"""
         widget = self.tab_widget.widget(index)
-        if index == self.tab_widget.count() - 2:
-            self.tab_widget.setCurrentIndex(index - 1)
-        self.tab_widget.removeTab(index)
-        widget.deleteLater()
+        if self.tab_widget.count() == 2:
+            widget.reset_tab()
+        else:
+            if index == self.tab_widget.count() - 2:
+                self.tab_widget.setCurrentIndex(index - 1)
+            self.tab_widget.removeTab(index)
+            widget.deleteLater()
 
-    def change_cross_hair(self):
+    def switch_cross_hair(self):
         """Включение/выключение перекрестия"""
         self.is_cross_hair_enabled = not self.is_cross_hair_enabled
         self.change_cross_hair_action_text()
